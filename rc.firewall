@@ -1,0 +1,244 @@
+#!/bin/bash
+
+# Firewall and router configuration and control
+#
+# Written by George D. Sotirov <gsotirov@obs.bg>
+# Last updated: 2004-07-15 10:30
+#
+
+# ****************************************************************************
+#  1. General configuration
+# ****************************************************************************
+
+# Commands
+IPTABLES=/usr/sbin/iptables
+MODPROBE=/sbin/modprobe
+RMMOD=/sbin/rmmod
+
+# Files for kernel setup
+ICMP_ECHO_IGNORE_BROADCASTS=/proc/sys/net/ipv4/icmp_echo_ignore_broadcasts
+ICMP_ECHO_IGNORE_ALL=/proc/sys/net/ipv4/icmp_echo_ignore_all
+TCP_SYNCOOKIES=/proc/sys/net/ipv4/tcp_syncookies
+IP_FORWARD=/proc/sys/net/ipv4/ip_forward
+IP_DYNADDR=/proc/sys/net/ipv4/ip_dynaddr
+RP_FILTER=/proc/sys/net/ipv4/conf/all/rp_filter
+PROXY_ARP=/proc/sys/net/ipv4/conf/all/proxy_arp
+
+# 1.1 Internet configuration
+#
+INET_IF=ppp0
+#INET_IP= # No IP specified since it is dynamicly allocated
+
+# 1.2 Local area network configuration
+#
+LAN_IF=eth1
+LAN_IP=192.168.1.1
+LAN_IP_RANGE=192.168.1.0/24
+
+# 1.3 Localhost configuration
+#
+LO_IF=lo
+LO_IP=127.0.0.1
+
+# ****************************************************************************
+#  2. Modules
+# ****************************************************************************
+
+# 2.1 Load modules
+#
+load_modules() {
+# 2.1.1 Main module
+  $MODPROBE ip_tables
+# 2.1.2 Connection tracking
+  $MODPROBE ip_conntrack
+  #$MODPROBE ip_conntrack_ftp
+  #$MODPROBE ip_conntrack_irc
+# 2.1.3 Tables
+  $MODPROBE iptable_filter
+  $MODPROBE iptable_mangle
+  $MODPROBE iptable_nat
+  #$MODPROBE ip_nat_ftp
+  #$MODPROBE ip_nat_irc
+# 2.1.4 Targets
+  $MODPROBE ipt_MASQUERADE
+  $MODPROBE ipt_TTL
+  $MODPROBE ipt_LOG
+  #$MODPROBE ipt_REJECT
+# 2.1.4 Other
+  $MODPROBE ipt_state
+  #$MODPROBE ipt_limit
+  #$MODPROBE ipt_owner
+}
+
+# 2.2 Unload modules
+#
+unload_modules() {
+# Try to unload all iptables modules with single command
+  $RMMOD -r ip_tables
+}
+
+# ****************************************************************************
+#  3. Kernel setup
+# ****************************************************************************
+
+kernel_setup() {
+# $0 - file in /proc to set with 1 or 0
+# $1 - what should be set
+  case "$1" in
+    "enable")
+      echo "1" > $0
+    ;;
+    "disable")
+      echo "0" > $0
+    ;;
+  esac
+}
+
+# ****************************************************************************
+#  4. Firewall and router setup
+# ****************************************************************************
+
+# 4.1 Initialization
+#
+flush_tables() {
+  $IPTABLES --flush
+  $IPTABLES --table nat --flush
+  $IPTABLES --delete-chain
+  $IPTABLES --table nat --delete-chain
+}
+
+# 4.1 Default policy setup
+#
+set_default_policy() {
+  $IPTABLES --policy INPUT   DROP
+  $IPTABLES --policy OUTPUT  DROP
+  $IPTABLES --policy FORWARD DROP
+}
+
+# 4.2 Firewall setup
+#
+make_firewall() {
+# 4.2.1 Default policyes
+#
+  set_default_policy
+
+# 4.2.2 INPUT chain
+#
+  # Drop bad tcp packets
+  $IPTABLES --append INPUT --protocol tcp ! --syn --match state --state NEW --jump DROP
+  $IPTABLES --append INPUT --protocol tcp --tcp-flags SYN,ACK SYN,ACK --match state --state NEW --jump REJECT --reject-with tcp-reset
+  $IPTABLES --append INPUT --protocol tcp --tcp-option ! 2 --jump REJECT --reject-with tcp-reset
+
+  # Drop all incoming unrelated traffic
+  $IPTABLES --append INPUT --match state --state INVALID --jump DROP
+
+  # Accept established connections
+  $IPTABLES --append INPUT --in-interface $LAN_IF --match state --state ESTABLISHED,RELATED --jump ACCEPT
+
+  # Rules for networks not part of the Internet
+  $IPTABLES --append INPUT --protocol all --in-interface $LAN_IF --source $LAN_IP_RANGE   --jump ACCEPT
+  $IPTABLES --append INPUT --protocol all --in-interface $LO_IF  --source $LO_IP          --jump ACCEPT
+  $IPTABLES --append INPUT --protocol all --in-interface $LO_IF  --source $LAN_IP         --jump ACCEPT
+  $IPTABLES --append INPUT --protocol all --in-interface $LO_IF  --out-interface $INET_IF --jump ACCEPT
+
+  # Enable specific ports to be accessable from outside
+  $IPTABLES --append INPUT --protocol tcp --in-interface $INET_IF --destination-port 22 --jump ACCEPT
+  $IPTABLES --append INPUT --protocol udp --in-interface $INET_IF --destination-port 22 --jump ACCEPT
+  # TODO: Add other ports here
+
+# 4.2.3 FORWARD chain
+#
+  $IPTABLES --append FORWARD --in-interface $LAN_IF --jump ACCEPT
+  $IPTABLES --append FORWARD --match state --state ESTABLISHED,RELATED --jump ACCEPT
+
+# 4.2.4 OUTPUT chain
+#
+  $IPTABLES --append OUTPUT --protocol all --source       $LO_IP   --jump ACCEPT
+  $IPTABLES --append OUTPUT --protocol all --source       $LAN_IP  --jump ACCEPT
+  $IPTABLES --append OUTPUT --protocol all --in-interface $INET_IF --jump ACCEPT
+
+  # Local interface setup
+  #$IPTABLES --append INPUT  --in-interface  $LO_IF --protocol all --jump ACCEPT
+  #$IPTABLES --append OUTPUT --out-interface $LO_IF --protocol all --jump ACCEPT
+}
+
+# 4.3 Router setup
+#
+make_router() {
+# Set up simple IP forwarding and masquerading
+  $IPTABLES --table mangle --append PREROUTING --jump TTL --ttl-set 128
+  $IPTABLES --table nat    --append POSTROUTING --out-interface $INET_IF --jump MASQUERADE
+  $IPTABLES --append FORWARD --in-interface $LAN_IF --jump ACCEPT
+}
+
+# ****************************************************************************
+#  5. Firewall and router control
+# ****************************************************************************
+
+# 5.1 Start
+#
+start() {
+  load_modules
+  echo -n "Configuring firewall... "
+  flush_tables
+  make_firewall
+  if [ $? == 0 ]; then
+    echo "Done"
+  fi
+  echo -n "Configuring router... "
+  make_router
+  kernel_setup $IP_FORWARD enable
+  kernel_setup $RP_FILTER enable
+  kernel_setup $TCP_SYNCOOKIES enable
+  if [ $? == 0 ]; then
+    echo "Done"
+  fi
+}
+
+# 5.2 Stop
+#
+stop() {
+  echo -n "Stopping router and firewall... "
+  kernel_setup $TCP_SYNCOOKIES disable
+  kernel_setup $RP_FILTER disable
+  kernel_setup $IP_FORWARD disable
+  flush_tables
+  unload_modules
+  if [ $? == 0 ]; then
+    echo "Done"
+  fi
+}
+
+# 5.3 Restart
+#
+restart() {
+  stop
+  sleep 2
+  start
+}
+
+# 5.4 Help information
+help() {
+  echo "Router and firewall control"
+  echo "Usage: ${0} start|stop|restart"
+  echo
+}
+
+# ****************************************************************************
+#  6. Main program
+# ****************************************************************************
+
+case "$1" in
+  "start")
+    start
+  ;;
+  "stop")
+    stop
+  ;;
+  "restart")
+    restart
+  ;;
+  *)
+    help
+esac
+
