@@ -3,12 +3,32 @@
 # Firewall and router configuration and control
 #
 # Written by George D. Sotirov <gsotirov@obs.bg>
-# Last updated: 2004-07-15 10:30
+# Last updated: 2005-03-23
 #
 
+# Uncoment to enable debug
+#set -x
+
+action=$1 # Action can be start | stop | restart | help. Default is 'help'.
+
+# Component can be router | firewall | both. Default is 'both'.
+case "a$2" in
+  "arouter" | "afirewall" | "aboth")
+    component=$2
+  ;;
+  *)
+    component="both"
+esac
+
 # ****************************************************************************
-#  1. General configuration
-# ****************************************************************************
+# 1. General configuration
+#
+
+# Bash colors
+C_GREEN=$'\e[32;01m'
+C_YELLOW=$'\e[33;01m'
+C_RED=$'\e[31;01m'
+C_NORMAL=$'\e[0m'
 
 # Commands
 IPTABLES=/usr/sbin/iptables
@@ -21,28 +41,69 @@ ICMP_ECHO_IGNORE_ALL=/proc/sys/net/ipv4/icmp_echo_ignore_all
 TCP_SYNCOOKIES=/proc/sys/net/ipv4/tcp_syncookies
 IP_FORWARD=/proc/sys/net/ipv4/ip_forward
 IP_DYNADDR=/proc/sys/net/ipv4/ip_dynaddr
+IP_LOCAL_PORT_RANGE=/proc/sys/net/ipv4/ip_local_port_range
 RP_FILTER=/proc/sys/net/ipv4/conf/all/rp_filter
 PROXY_ARP=/proc/sys/net/ipv4/conf/all/proxy_arp
 
-# 1.1 Internet configuration
-#
-INET_IF=ppp0
-#INET_IP= # No IP specified since it is dynamicly allocated
+# Logging
+LOG_FILE=/var/log/rc.firewall.log
 
-# 1.2 Local area network configuration
-#
-LAN_IF=eth1
-LAN_IP=192.168.1.1
-LAN_IP_RANGE=192.168.1.0/24
+# Blacklist
+BL_FILE=/etc/firewall_blacklist
+declare -a BLACKLIST
+BLACKLIST=(`cat "$BL_FILE" | tr '\n' ' '`)
 
-# 1.3 Localhost configuration
+# Variables
+IP_PORT_RANGE_LOW=32768
+IP_PORT_RANGE_HIGH=65000
+
+# 1.1 Localhost configuration
 #
 LO_IF=lo
 LO_IP=127.0.0.1
+LO_NTWRK=127.0.0.0/8
+
+# 1.2 External interface cofiguration
+#
+EXT_IF=eth0
+EXT_IP=192.168.0.1
+EXT_NTWRK=192.168.0.1/24
+
+# 1.3 Local area network configuration
+#
+LAN_IF=eth1
+LAN_IP=192.168.1.1
+LAN_NTWRK=192.168.1.1/24
+
+# 1.4 Internet configuration
+#
+INET_IF=ppp0
+INET_IP=
+INET_NTWRK=0.0.0.0/0
+
+# 1.5 Enabled ports
+# Enable standard service ports - ftp(s), ssh, snmp http(s)
+SERVICE_PORTS='20 21 22 25 80 443 990'
+# Enable local ip port range
+SYS_LOCAL_PORT_RANGE=`cat $IP_LOCAL_PORT_RANGE | awk '{ print $1":"$2; }'`
+
+if [ ! -z $SYS_LOCAL_PORT_RANGE ]; then
+  PORT_RANGE=$SYS_LOCAL_PORT_RANGE
+else
+  PORT_RANGE="$IP_PORT_RANGE_LOW:$IP_PORT_RANGE_HIGH"
+fi
+
+# 1.5.1 TCP ports
+OTHER_TCP_PORTS='6880 6881 6969 27960'
+TCP_PORTS_ENABLED="$SERVICE_PORTS $OTHER_TCP_PORTS $PORT_RANGE"
+
+# 1.5.2 UDP ports
+OTHER_UDP_PORTS=27960
+UDP_PORTS_ENABLED="$SERVICE_PORTS $OTHER_UDP_PORTS $PORT_RANGE"
 
 # ****************************************************************************
-#  2. Modules
-# ****************************************************************************
+# 2. Modules
+#
 
 # 2.1 Load modules
 #
@@ -53,163 +114,279 @@ load_modules() {
   $MODPROBE ip_conntrack
   #$MODPROBE ip_conntrack_ftp
   #$MODPROBE ip_conntrack_irc
-# 2.1.3 Tables
-  $MODPROBE iptable_filter
-  $MODPROBE iptable_mangle
-  $MODPROBE iptable_nat
   #$MODPROBE ip_nat_ftp
   #$MODPROBE ip_nat_irc
+# 2.1.3 Tables
+  $MODPROBE iptable_filter
+  $MODPROBE iptable_nat
+  $MODPROBE iptable_mangle
 # 2.1.4 Targets
   $MODPROBE ipt_MASQUERADE
   $MODPROBE ipt_TTL
   $MODPROBE ipt_LOG
-  #$MODPROBE ipt_REJECT
-# 2.1.4 Other
+  $MODPROBE ipt_REJECT
   $MODPROBE ipt_state
-  #$MODPROBE ipt_limit
+  $MODPROBE ipt_limit
   #$MODPROBE ipt_owner
 }
 
 # 2.2 Unload modules
 #
 unload_modules() {
-# Try to unload all iptables modules with single command
-  $RMMOD -r ip_tables
+  #$RMMOD ipt_owner
+  $RMMOD ipt_limit        >/dev/null 2>/dev/null
+  $RMMOD ipt_state        >/dev/null 2>/dev/null
+  $RMMOD ipt_REJECT       >/dev/null 2>/dev/null
+  $RMMOD ipt_LOG          >/dev/null 2>/dev/null
+  $RMMOD ipt_TTL          >/dev/null 2>/dev/null
+  $RMMOD ipt_MASQUERADE   >/dev/null 2>/dev/null
+  $RMMOD iptable_mangle   >/dev/null 2>/dev/null
+  $RMMOD iptable_nat      >/dev/null 2>/dev/null
+  $RMMOD iptable_filter   >/dev/null 2>/dev/null
+  #$RMMOD ip_nat_irc       >/dev/null 2>/dev/null
+  #$RMMOD ip_nat_ftp       >/dev/null 2>/dev/null
+  #$RMMOD ip_conntrack_irc >/dev/null 2>/dev/null
+  #$RMMOD ip_conntrack_ftp >/dev/null 2>/dev/null
+  $RMMOD ip_conntrack     >/dev/null 2>/dev/null
+  $RMMOD ip_tables        >/dev/null 2>/dev/null
 }
 
-# ****************************************************************************
-#  3. Kernel setup
-# ****************************************************************************
+#
+# 3. Kernel setup
+#
 
 kernel_setup() {
-# $0 - file in /proc to set with 1 or 0
-# $1 - what should be set
-  case "$1" in
-    "enable")
-      echo "1" > $0
+  file=$1
+  action=$2
+
+  case "k$action" in
+    "ks_enable")
+      echo "1" > $file 2>/dev/null
     ;;
-    "disable")
-      echo "0" > $0
+    "ks_disable")
+      echo "0" > $file 2>/dev/null
     ;;
   esac
 }
 
-# ****************************************************************************
-#  4. Firewall and router setup
-# ****************************************************************************
+#
+# 4. Firewall and router setup
+#
 
 # 4.1 Initialization
 #
-flush_tables() {
+flush() {
+  # Flush everything
   $IPTABLES --flush
-  $IPTABLES --table nat --flush
+  $IPTABLES --table filter --flush
+  $IPTABLES --table nat    --flush
+  $IPTABLES --table mangle --flush
+
+  # Delete chains
   $IPTABLES --delete-chain
-  $IPTABLES --table nat --delete-chain
+  $IPTABLES --table filter --delete-chain
+  $IPTABLES --table nat    --delete-chain
+  $IPTABLES --table mangle --delete-chain
 }
 
 # 4.1 Default policy setup
 #
 set_default_policy() {
   $IPTABLES --policy INPUT   DROP
-  $IPTABLES --policy OUTPUT  DROP
+  $IPTABLES --policy OUTPUT  ACCEPT
   $IPTABLES --policy FORWARD DROP
 }
 
-# 4.2 Firewall setup
+# 4.2 Define user chains
+#
+define_user_chains() {
+  $IPTABLES --new-chain TCP
+  $IPTABLES --new-chain UDP
+  $IPTABLES --new-chain ICMP
+  $IPTABLES --flush     TCP
+  $IPTABLES --flush     UDP
+  $IPTABLES --flush     ICMP
+}
+
+# 4.3 Define TCP chain
+#
+build_tcp_chain() {
+  # Enable specific ports from Internet
+  for PORT in $TCP_PORTS_ENABLED; do
+    $IPTABLES --append TCP --protocol tcp --destination-port $PORT --jump ACCEPT
+  done
+
+  # Set default policy
+  $IPTABLES --append TCP --protocol tcp --jump DROP
+}
+
+# 4.4 Define UDP chain
+#
+build_udp_chain() {
+  # Enable specific ports from Internet
+  for PORT in $UDP_PORTS_ENABLED; do
+    $IPTABLES --append UDP --protocol udp --destination-port $PORT --jump ACCEPT
+  done
+
+  # Set default policy
+  $IPTABLES --append UDP --protocol udp --jump DROP
+}
+
+# 4.5 Define ICMP chain
+#
+build_icmp_chain() {
+  # INFO: ICMP types
+  # Type    Name                                  Reference
+  # ------- ------------------------------------- ---------------
+  #   0     Echo Reply                            [RFC792]
+  #   1     Unassigned                            [JBP]
+  #   2     Unassigned                            [JBP]
+  #   3     Destination Unreachable               [RFC792]
+  #   4     Source Quench                         [RFC792]
+  #   5     Redirect                              [RFC792]
+  #   6     Alternate Host Address                [JBP]
+  #   7     Unassigned                            [JBP]
+  #   8     Echo                                  [RFC792]
+  #   9     Router Advertisement                  [RFC1256]
+  #  10     Router Solicitation                   [RFC1256]
+  #  11     Time Exceeded                         [RFC792]
+  #  12     Parameter Problem                     [RFC792]
+  #  13     Timestamp                             [RFC792]
+  #  14     Timestamp Reply                       [RFC792]
+  #  15     Information Request                   [RFC792]
+  #  16     Information Reply                     [RFC792]
+  #  17     Address Mask Request                  [RFC950]
+  #  18     Address Mask Reply                    [RFC950]
+  #  19     Reserved (for Security)               [Solo]
+  #  20-29  Reserved (for Robustness Experiment)  [ZSu]
+  #  30     Traceroute                            [RFC1393]
+  #  31     Datagram Conversion Error             [RFC1475]
+  #  32     Mobile Host Redirect                  [David Johnson]
+  #  33     IPv6 Where-Are-You                    [Bill Simpson]
+  #  34     IPv6 I-Am-Here                        [Bill Simpson]
+  #  35     Mobile Registration Request           [Bill Simpson]
+  #  36     Mobile Registration Reply             [Bill Simpson]
+  #  37     Domain Name Request                   [RFC1788]
+  #  38     Domain Name Reply                     [RFC1788]
+  #  39     SKIP                                  [Markson]
+  #  40     Photuris                              [RFC2521]
+  #  41-255 Reserved                              [JBP]
+
+  $IPTABLES --append ICMP --protocol icmp --icmp-type  0 --jump ACCEPT
+  $IPTABLES --append ICMP --protocol icmp --icmp-type  3 --jump ACCEPT
+  $IPTABLES --append ICMP --protocol icmp --icmp-type  4 --jump ACCEPT
+  $IPTABLES --append ICMP --protocol icmp --icmp-type  8 --match limit --limit 6/m --jump ACCEPT
+  $IPTABLES --append ICMP --protocol icmp --icmp-type  8 --jump ACCEPT
+  $IPTABLES --append ICMP --protocol icmp --icmp-type 11 --jump ACCEPT
+  $IPTABLES --append ICMP --protocol icmp --icmp-type 12 --jump ACCEPT
+  $IPTABLES --append ICMP --protocol icmp --icmp-type 30 --jump ACCEPT
+
+  # Set default policy
+  $IPTABLES --append ICMP --protocol icmp                --jump DROP
+}
+
+# 5. Firewall setup
 #
 make_firewall() {
-# 4.2.1 Default policyes
-#
+  # Set default policy
   set_default_policy
+  # Define user chains
+  define_user_chains
+  # Build user chains
+  build_tcp_chain
+  build_udp_chain
+  build_icmp_chain
 
-# 4.2.2 INPUT chain
-#
-  # Drop bad tcp packets
-  $IPTABLES --append INPUT --protocol tcp ! --syn --match state --state NEW --jump DROP
-  $IPTABLES --append INPUT --protocol tcp --tcp-flags SYN,ACK SYN,ACK --match state --state NEW --jump REJECT --reject-with tcp-reset
-  $IPTABLES --append INPUT --protocol tcp --tcp-option ! 2 --jump REJECT --reject-with tcp-reset
+  # Setup INPUT chain
+  #
+  # Drop packets from any host from the blacklist
+  #
+  for i in $(seq 0 $((${#BLACKLIST[@]} - 1)))
+  do
+    $IPTABLES --append INPUT --source ${BLACKLIST[$i]} --jump DROP
+  done
 
-  # Drop all incoming unrelated traffic
-  $IPTABLES --append INPUT --match state --state INVALID --jump DROP
+  $IPTABLES --append INPUT --in-interface $EXT_IF  --protocol tcp  --jump TCP
+  $IPTABLES --append INPUT --in-interface $EXT_IF  --protocol udp  --jump UDP
+  $IPTABLES --append INPUT --in-interface $EXT_IF  --protocol icmp --jump ICMP
 
-  # Accept established connections
-  $IPTABLES --append INPUT --in-interface $LAN_IF --match state --state ESTABLISHED,RELATED --jump ACCEPT
+  $IPTABLES --append INPUT --in-interface $INET_IF --protocol tcp  --jump TCP
+  $IPTABLES --append INPUT --in-interface $INET_IF --protocol udp  --jump UDP 
+  $IPTABLES --append INPUT --in-interface $INET_IF --protocol icmp --jump ICMP 
 
-  # Rules for networks not part of the Internet
-  $IPTABLES --append INPUT --protocol all --in-interface $LAN_IF --source $LAN_IP_RANGE   --jump ACCEPT
-  $IPTABLES --append INPUT --protocol all --in-interface $LO_IF  --source $LO_IP          --jump ACCEPT
-  $IPTABLES --append INPUT --protocol all --in-interface $LO_IF  --source $LAN_IP         --jump ACCEPT
-  $IPTABLES --append INPUT --protocol all --in-interface $LO_IF  --out-interface $INET_IF --jump ACCEPT
+  $IPTABLES --append INPUT --in-interface $LO_IF                   --jump ACCEPT
+  $IPTABLES --append INPUT --in-interface $LAN_IF                  --jump ACCEPT
 
-  # Enable specific ports to be accessable from outside
-  $IPTABLES --append INPUT --protocol tcp --in-interface $INET_IF --destination-port 22 --jump ACCEPT
-  $IPTABLES --append INPUT --protocol udp --in-interface $INET_IF --destination-port 22 --jump ACCEPT
-  # TODO: Add other ports here
+  # Setup OUTPUT chain
+  #
+  #$IPTABLES --append OUTPUT --out-interface $LO_IF   --jump ACCEPT
 
-# 4.2.3 FORWARD chain
-#
-  $IPTABLES --append FORWARD --in-interface $LAN_IF --jump ACCEPT
-  $IPTABLES --append FORWARD --match state --state ESTABLISHED,RELATED --jump ACCEPT
-
-# 4.2.4 OUTPUT chain
-#
-  $IPTABLES --append OUTPUT --protocol all --source       $LO_IP   --jump ACCEPT
-  $IPTABLES --append OUTPUT --protocol all --source       $LAN_IP  --jump ACCEPT
-  $IPTABLES --append OUTPUT --protocol all --in-interface $INET_IF --jump ACCEPT
-
-  # Local interface setup
-  #$IPTABLES --append INPUT  --in-interface  $LO_IF --protocol all --jump ACCEPT
-  #$IPTABLES --append OUTPUT --out-interface $LO_IF --protocol all --jump ACCEPT
+  #
+  # FORWARD chain setup
+  #
+  if [ "a$component" == "arouter" -o "a$component" == "aboth" ]; then
+    $IPTABLES --append FORWARD --in-interface $LAN_IF  --out-interface $INET_IF --source $LAN_NTWRK      --jump ACCEPT
+    $IPTABLES --append FORWARD --in-interface $INET_IF --out-interface $LAN_IF  --destination $LAN_NTWRK --jump ACCEPT
+  fi
 }
 
-# 4.3 Router setup
+# 6. Router setup
 #
 make_router() {
-# Set up simple IP forwarding and masquerading
-  $IPTABLES --table mangle --append PREROUTING --jump TTL --ttl-set 128
+# 6.1 Set up IP forwarding and masquerading (NAT)
+#
+  $IPTABLES --table mangle --append PREROUTING  --in-interface  $INET_IF --jump TTL --ttl-inc 1
+  $IPTABLES --table mangle --append POSTROUTING --source $LAN_NTWRK --out-interface $INET_IF --jump TTL --ttl-set 64
   $IPTABLES --table nat    --append POSTROUTING --out-interface $INET_IF --jump MASQUERADE
-  $IPTABLES --append FORWARD --in-interface $LAN_IF --jump ACCEPT
 }
 
-# ****************************************************************************
-#  5. Firewall and router control
-# ****************************************************************************
+#
+# 7. Firewall and router control
+#
 
-# 5.1 Start
+# 7.1 Start
 #
 start() {
   load_modules
-  echo -n "Configuring firewall... "
-  flush_tables
-  make_firewall
-  if [ $? == 0 ]; then
-    echo "Done"
+  flush
+
+  # 7.1.1 Start firewall
+  if [ "a$component" == "afirewall" -o "a$component" == "aboth" ]; then
+    echo -n "Configuring firewall... "
+    make_firewall
+    if [ $? == 0 ]; then
+      echo "${C_GREEN}Done${C_NORMAL}"
+    fi
   fi
-  echo -n "Configuring router... "
-  make_router
-  kernel_setup $IP_FORWARD enable
-  kernel_setup $RP_FILTER enable
-  kernel_setup $TCP_SYNCOOKIES enable
-  if [ $? == 0 ]; then
-    echo "Done"
+
+  # 7.1.2 Start router
+  if [ "a$component" == "arouter" -o "a$component" == "aboth" ]; then
+    echo -n "Configuring router... "
+    make_router
+    kernel_setup $IP_FORWARD s_enable
+    kernel_setup $RP_FILTER s_enable
+    kernel_setup $TCP_SYNCOOKIES s_enable
+    if [ $? == 0 ]; then
+      echo "${C_GREEN}Done${C_NORMAL}"
+    fi
   fi
 }
 
-# 5.2 Stop
+# 7.2 Stop
 #
 stop() {
   echo -n "Stopping router and firewall... "
-  kernel_setup $TCP_SYNCOOKIES disable
-  kernel_setup $RP_FILTER disable
-  kernel_setup $IP_FORWARD disable
-  flush_tables
+  kernel_setup $TCP_SYNCOOKIES s_disable
+  kernel_setup $RP_FILTER      s_disable
+  kernel_setup $IP_FORWARD     s_disable
+  flush
   unload_modules
   if [ $? == 0 ]; then
-    echo "Done"
+    echo "${C_GREEN}Done${C_NORMAL}"
   fi
 }
 
-# 5.3 Restart
+# 7.3 Restart
 #
 restart() {
   stop
@@ -217,18 +394,24 @@ restart() {
   start
 }
 
-# 5.4 Help information
+# 7.4 Help information
+#
 help() {
-  echo "Router and firewall control"
-  echo "Usage: ${0} start|stop|restart"
+  echo "Router and firewall control 0.1"
+  echo "Written by George D. Sotirov <gdsotirov@dir.bg>"
+  echo
+  echo "Usage: ${0} [action] [component]"
+  echo "        action    - Action can be one of start, stop, restart, help."
+  echo "                    Default is help."
+  echo "        component - Component can be one of router, firewall, both."
+  echo "                    Default is both."
   echo
 }
 
-# ****************************************************************************
-#  6. Main program
-# ****************************************************************************
-
-case "$1" in
+#
+# Main program
+#
+case "$action" in
   "start")
     start
   ;;
