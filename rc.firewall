@@ -4,11 +4,9 @@
 # Version: 0.2.0
 #
 # Written by George D. Sotirov <gsotirov@obs.bg>
-# Last updated: 2005-03-23
+# $Id: rc.firewall,v 1.4 2005/05/07 17:40:13 gsotirov Exp $
 #
 
-# Uncoment to enable debug
-#set -x
 
 # ****************************************************************************
 # 1. General configuration
@@ -19,6 +17,8 @@
 if [ "x$DENY_FILE" != "x" ]; then
   declare -a DENY_LIST
   DENY_LIST=(`cat "$DENY_FILE" | tr '\n' ' '`)
+else
+  DENY_LIST=
 fi
 
 # ****************************************************************************
@@ -158,7 +158,7 @@ build_scan_chain() {
     $IPTABLES --append SCAN --protocol tcp  --match limit --limit 1/s --jump LOG --log-prefix "[Possible TCP Scan] "
     $IPTABLES --append SCAN --protocol udp  --match limit --limit 1/s --jump LOG --log-prefix "[Possible UDP Scan] "
     $IPTABLES --append SCAN --protocol icmp --match limit --limit 1/s --jump LOG --log-prefix "[Possible ICMP Scan] "
-    $IPTABLES --append SCAN --fragment      --matcg limit --limit 1/s --jump LOG --log-prefix "[Possible FRAG Scan] "
+    $IPTABLES --append SCAN --fragment      --match limit --limit 1/s --jump LOG --log-prefix "[Possible FRAG Scan] "
   fi
   # Default policy
   $IPTABLES --append SCAN --jump DROP
@@ -295,30 +295,32 @@ make_firewall() {
   #
 
   # Drop packets from any host from the deny list
-  for i in $(seq 0 $((${#DENY_LIST[@]} - 1)))
-  do
-    $IPTABLES --append INPUT --source ${DENY_LIST[$i]} --jump DROP
-  done
+  if [ "x$DENY_LIST" != "x" ]; then
+    for i in $(seq 0 $((${#DENY_LIST[@]} - 1)))
+    do
+      $IPTABLES --append INPUT --source ${DENY_LIST[$i]} --jump DROP
+    done
+  fi
 
   if [ "x$SPOOF_CHAIN" == "xyes" ]; then
     # Log and drop suspicious source addresses
-    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_A_PRVT_NTWK --jump SPOOF
-    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_A_PRVT_NTWK --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_A_PRVT_NTWRK  --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_A_PRVT_NTWRK  --jump SPOOF
 
-    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_B_PRVT_NTWK --jump SPOOF
-    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_B_PRVT_NTWK --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_B_PRVT_NTWRK  --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_B_PRVT_NTWRK  --jump SPOOF
 
-    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $LO_NTWK           --jump SPOOF
-    $IPTABLES --append INPUT --in-interface $INET_IF --source $LO_NTWK           --jump SPOOF
-    $IPTABLES --append INPUT --in-interface $LAN_IF  --source $LO_NTWK           --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $LO_NTWRK            --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $INET_IF --source $LO_NTWRK            --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $LAN_IF  --source $LO_NTWRK            --jump SPOOF
 
-    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_D_MLTCST    --jump SPOOF
-    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_D_MLTCST    --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_D_MLTCST      --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_D_MLTCST      --jump SPOOF
 
-    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_E_RSRVD_NET --jump SPOOF
-    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_E_RSRVD_NET --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_E_RSRVD_NTWRK --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_E_RSRVD_NTWRK --jump SPOOF
 
-    #$IPTABLES --append INPUT                         --source $ANYWHERE          --jump SPOOF
+    #$IPTABLES --append INPUT                         --source $ANYWHERE           --jump SPOOF
   fi
 
   if [ "x$BAD_TCP_CHAIN" == "xyes" ]; then
@@ -357,7 +359,7 @@ make_firewall() {
   # Enable all traffic on the 'trusted' interfaces
   $IPTABLES --append INPUT --in-interface $LO_IF                   --jump ACCEPT
   if [ "x$ROUTER" == "xyes" ]; then
-    $IPTABLES --append INPUT --in-interface $LAN_IF --source $LAN_NTWK --jump ACCEPT
+    $IPTABLES --append INPUT --in-interface $LAN_IF --source $LAN_NTWRK --jump ACCEPT
   fi
 
   # 5.3 Setup OUTPUT chain
@@ -412,7 +414,7 @@ start() {
 # 6.2 Stop
 #
 stop() {
-  if [ "a$ROUTER" == "ayes"
+  if [ "a$ROUTER" == "ayes" ]; then
     echo -n "Stopping firewall and router... "
   else
     echo -n "Stopping firewall... "
@@ -437,7 +439,7 @@ restart() {
 # 6.4 Help information
 #
 help() {
-  echo "Router and firewall control 0.1"
+  echo "firewall for slackware 0.2.0"
   echo "Written by George D. Sotirov <gdsotirov@dir.bg>"
   echo
   echo "Usage: ${0} [action]"
@@ -445,6 +447,8 @@ help() {
   echo "                    Default is help."
   echo
 }
+
+action=$1
 
 #
 # Main program
@@ -462,3 +466,4 @@ case "$action" in
   *)
     help
 esac
+
