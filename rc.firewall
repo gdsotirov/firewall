@@ -5,7 +5,7 @@
 #
 # Written by George D. Sotirov <gdsotirov@dir.bg>
 # Based on examples over the Internet
-# $Id: rc.firewall,v 1.5 2009/10/11 11:07:03 gsotirov Exp $
+# $Id: rc.firewall,v 1.6 2009/10/11 11:08:45 gsotirov Exp $
 #
 
 
@@ -466,9 +466,11 @@ start() {
     kernel_setup $IP_FORWARD s_disable
   fi
 
-  echo -n "Configuring firewall... "
-  make_firewall
-  print_result $?
+  if [ "a$FIREWALL" == "ayes" ]; then
+    echo -n "Configuring firewall... "
+    make_firewall
+    print_result $?
+  fi
 
   if [ "a$ROUTER" == "ayes" ]; then
     echo -n "Configuring router... "
