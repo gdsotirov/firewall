@@ -1,10 +1,11 @@
 #!/bin/bash
 
 # Firewall and router setup and control
-# Version: 0.2.0
+# Version: 0.2.1
 #
-# Written by George D. Sotirov <gsotirov@obs.bg>
-# $Id: rc.firewall,v 1.4 2005/05/07 17:40:13 gsotirov Exp $
+# Written by George D. Sotirov <gdsotirov@dir.bg>
+# Based on examples over the Internet
+# $Id: rc.firewall,v 1.5 2009/10/11 11:07:03 gsotirov Exp $
 #
 
 
@@ -12,14 +13,17 @@
 # 1. General configuration
 #
 
-. /etc/firewall.conf
+. /etc/rc.d/rc.firewall.conf
 
-if [ "x$DENY_FILE" != "x" ]; then
-  declare -a DENY_LIST
-  DENY_LIST=(`cat "$DENY_FILE" | tr '\n' ' '`)
-else
-  DENY_LIST=
-fi
+
+print_result() {
+  if [ $1 == 0 ]; then
+    echo $NTFY_DONE
+  else
+    echo $NTFY_FAIL
+  fi
+}
+
 
 # ****************************************************************************
 # 2. Modules
@@ -29,47 +33,51 @@ fi
 #
 load_modules() {
 # 2.1.1 Main module
-  $MODPROBE ip_tables
+  $LDMOD ip_tables        >/dev/null 2>$LOG_FILE
 # 2.1.2 Connection tracking
-  #$MODPROBE ip_conntrack
-  #$MODPROBE ip_conntrack_ftp
-  #$MODPROBE ip_conntrack_irc
-  #$MODPROBE ip_nat_ftp
-  #$MODPROBE ip_nat_irc
+  $LDMOD ip_conntrack     >/dev/null 2>$LOG_FILE
+  #$LDMOD ip_conntrack_ftp
+  #$LDMOD ip_conntrack_irc
+  #$LDMOD ip_nat_ftp
+  #$LDMOD ip_nat_irc
 # 2.1.3 Tables
-  $MODPROBE iptable_filter
-  $MODPROBE iptable_nat
-  $MODPROBE iptable_mangle
+  $LDMOD iptable_filter   >/dev/null 2>$LOG_FILE
+  $LDMOD iptable_nat      >/dev/null 2>$LOG_FILE
+  $LDMOD iptable_mangle   >/dev/null 2>$LOG_FILE
 # 2.1.4 Targets
-  $MODPROBE ipt_MASQUERADE
-  $MODPROBE ipt_TTL
-  $MODPROBE ipt_LOG
-  $MODPROBE ipt_REJECT
-  $MODPROBE ipt_state
-  $MODPROBE ipt_limit
+  $LDMOD ipt_MASQUERADE   >/dev/null 2>$LOG_FILE
+  $LDMOD ipt_TTL          >/dev/null 2>$LOG_FILE
+  $LDMOD ipt_LOG          >/dev/null 2>$LOG_FILE
+  $LDMOD ipt_REJECT       >/dev/null 2>$LOG_FILE
+  $LDMOD ipt_state        >/dev/null 2>$LOG_FILE
+  $LDMOD ipt_limit        >/dev/null 2>$LOG_FILE
 }
 
 # 2.2 Unload modules
 #
 unload_modules() {
-  $RMMOD ipt_limit        >/dev/null 2>/dev/null
-  $RMMOD ipt_state        >/dev/null 2>/dev/null
-  $RMMOD ipt_REJECT       >/dev/null 2>/dev/null
-  $RMMOD ipt_LOG          >/dev/null 2>/dev/null
-  $RMMOD ipt_TTL          >/dev/null 2>/dev/null
-  $RMMOD ipt_MASQUERADE   >/dev/null 2>/dev/null
-  $RMMOD iptable_mangle   >/dev/null 2>/dev/null
-  $RMMOD iptable_nat      >/dev/null 2>/dev/null
-  $RMMOD iptable_filter   >/dev/null 2>/dev/null
-  #$RMMOD ip_nat_irc       >/dev/null 2>/dev/null
-  #$RMMOD ip_nat_ftp       >/dev/null 2>/dev/null
-  #$RMMOD ip_conntrack_irc >/dev/null 2>/dev/null
-  #$RMMOD ip_conntrack_ftp >/dev/null 2>/dev/null
-  #$RMMOD ip_conntrack     >/dev/null 2>/dev/null
-  $RMMOD ip_tables        >/dev/null 2>/dev/null
+# 2.2.1 Targets
+  $RMMOD ipt_limit        >/dev/null 2>$LOG_FILE
+  $RMMOD ipt_state        >/dev/null 2>$LOG_FILE
+  $RMMOD ipt_REJECT       >/dev/null 2>$LOG_FILE
+  $RMMOD ipt_LOG          >/dev/null 2>$LOG_FILE
+  $RMMOD ipt_TTL          >/dev/null 2>$LOG_FILE
+  $RMMOD ipt_MASQUERADE   >/dev/null 2>$LOG_FILE
+# 2.2.2 Tables
+  $RMMOD iptable_mangle   >/dev/null 2>$LOG_FILE
+  $RMMOD iptable_nat      >/dev/null 2>$LOG_FILE
+  $RMMOD iptable_filter   >/dev/null 2>$LOG_FILE
+# 2.2.3 Connection tracking
+  #$RMMOD ip_nat_irc       >/dev/null 2>$LOG_FILE
+  #$RMMOD ip_nat_ftp       >/dev/null 2>$LOG_FILE
+  #$RMMOD ip_conntrack_irc >/dev/null 2>$LOG_FILE
+  #$RMMOD ip_conntrack_ftp >/dev/null 2>$LOG_FILE
+  $RMMOD ip_conntrack     >/dev/null 2>$LOG_FILE
+# 2.2.4 Main module
+  $RMMOD ip_tables        >/dev/null 2>$LOG_FILE
 }
 
-#
+# ****************************************************************************
 # 3. Kernel setup
 #
 
@@ -87,7 +95,7 @@ kernel_setup() {
   esac
 }
 
-#
+# ****************************************************************************
 # 4. Firewall and router setup
 #
 
@@ -118,111 +126,125 @@ set_default_policy() {
 # 4.2 SPOOF Chain
 #
 build_spoof_chain() {
+  CHAIN_SPOOF_NAME=SPOOF
+
   # Create chain
-  $IPTABLES --new-chain SPOOF
-  $IPTABLES --flush     SPOOF
+  $IPTABLES --new-chain $CHAIN_SPOOF_NAME
+  $IPTABLES --flush     $CHAIN_SPOOF_NAME
   # Define chain
   if [ "x$SPOOF_LOG" == "xyes" ]; then
-    $IPTABLES --append SPOOF --match limit --limit 1/s --jump LOG --log-prefix "[Spoofing] "
+    $IPTABLES --append $CHAIN_SPOOF_NAME --match limit --limit 1/s --jump LOG --log-prefix "[Spoofing] "
   fi
   # Default policy
-  $IPTABLES --append SPOOF --jump DROP
+  $IPTABLES --append $CHAIN_SPOOF_NAME --jump DROP
 
-  SPOOF_CHAIN=yes
+  CHAIN_SPOOF=yes
 }
 
 # 4.3 BAD_TCP Chain - Do not process bad TCP packets
 #
 build_bad_tcp_chain() {
+  CHAIN_BADTCP_NAME=BAD_TCP
+
   # Create chain
-  $IPTABLES --new-chain BAD_TCP
-  $IPTABLES --flush     BAD_TCP
+  $IPTABLES --new-chain $CHAIN_BADTCP_NAME
+  $IPTABLES --flush     $CHAIN_BADTCP_NAME
   # Define chain
   if [ "x$BAD_TCP_LOG" == "xyes" ]; then
-    $IPTABLES --append BAD_TCP --protocol tcp --match limit --limit 1/s --jump LOG --log-prefix "[Bad TCP] "
+    $IPTABLES --append $CHAIN_BADTCP_NAME --protocol tcp --match limit --limit 1/s --jump LOG --log-prefix "[Bad TCP] "
   fi
   # Default policy
-  $IPTABLES --append BAD_TCP --jump DROP
+  $IPTABLES --append $CHAIN_BADTCP_NAME --jump DROP
 
-  BAD_TCP_CHAIN=yes
+  CHAIN_BADTCP=yes
 }
 
 # 4.4 SCAN Chain - Prevent port scanning
 #
 build_scan_chain() {
+  CHAIN_SCAN_NAME=SCAN
+
   # Create chain
-  $IPTABLES --new-chain SCAN
-  $IPTABLES --flush     SCAN
+  $IPTABLES --new-chain $CHAIN_SCAN_NAME
+  $IPTABLES --flush     $CHAIN_SCAN_NAME
   # Define chain
   if [ "x$SCAN_LOG" == "xyes" ]; then
-    $IPTABLES --append SCAN --protocol tcp  --match limit --limit 1/s --jump LOG --log-prefix "[Possible TCP Scan] "
-    $IPTABLES --append SCAN --protocol udp  --match limit --limit 1/s --jump LOG --log-prefix "[Possible UDP Scan] "
-    $IPTABLES --append SCAN --protocol icmp --match limit --limit 1/s --jump LOG --log-prefix "[Possible ICMP Scan] "
-    $IPTABLES --append SCAN --fragment      --match limit --limit 1/s --jump LOG --log-prefix "[Possible FRAG Scan] "
+    $IPTABLES --append $CHAIN_SCAN_NAME --protocol tcp  --match limit --limit 1/s --jump LOG --log-prefix "[Possible TCP Scan] "
+    $IPTABLES --append $CHAIN_SCAN_NAME --protocol udp  --match limit --limit 1/s --jump LOG --log-prefix "[Possible UDP Scan] "
+    $IPTABLES --append $CHAIN_SCAN_NAME --protocol icmp --match limit --limit 1/s --jump LOG --log-prefix "[Possible ICMP Scan] "
+    $IPTABLES --append $CHAIN_SCAN_NAME --fragment      --match limit --limit 1/s --jump LOG --log-prefix "[Possible FRAG Scan] "
   fi
   # Default policy
-  $IPTABLES --append SCAN --jump DROP
+  $IPTABLES --append $CHAIN_SCAN_NAME --jump DROP
 
-  SCAN_CHAIN=yes
+  CHAIN_SCAN=yes
 }
 
 # 4.5 DDoS Chain - Prevent [Distributed] Denial of Service attacks
 #
 build_ddos_chain() {
+  CHAIN_DDOS_NAME=DDoS
+
   # Create chain
-  $IPTABLES --new-chain DDoS
-  $IPTABLES --flush     DDoS
+  $IPTABLES --new-chain $CHAIN_DDOS_NAME
+  $IPTABLES --flush     $CHAIN_DDOS_NAME
   # Define chain
   if [ "x$DDoS_LOG" == "xyes" ]; then
-    $IPTABLES --append DDoS --match limit --limit 12/s --limit-burst 24 --jump RETURN
-    $IPTABLES --append DDoS --jump LOG --log-prefix "[Possible DDoS attack] "
+    $IPTABLES --append $CHAIN_DDOS_NAME --match limit --limit 12/s --limit-burst 24 --jump RETURN
+    $IPTABLES --append $CHAIN_DDOS_NAME --jump LOG --log-prefix "[Possible DDoS attack] "
   fi
   # Default policy
-  $IPTABLES --append DDoS --jump DROP
+  $IPTABLES --append $CHAIN_DDOS_NAME --jump DROP
 
-  DDoS_CHAIN=yes
+  CHAIN_DDOS=yes
 }
 
 # 4.6 TCP chain - Enable only specified TCP ports
 #
 build_tcp_chain() {
+  CHAIN_TCP_NAME=TCP
+
   # Create chain
-  $IPTABLES --new-chain TCP
-  $IPTABLES --flush     TCP
+  $IPTABLES --new-chain $CHAIN_TCP_NAME
+  $IPTABLES --flush     $CHAIN_TCP_NAME
   # Define chain
   for PORT in $ENABLED_TCP_PORTS; do
-    $IPTABLES --append TCP --protocol tcp --destination-port $PORT --jump ACCEPT
+    $IPTABLES --append $CHAIN_TCP_NAME --protocol tcp --destination-port $PORT --jump ACCEPT
   done
 
   # Default policy
-  $IPTABLES --append TCP --protocol tcp --jump DROP
+  $IPTABLES --append $CHAIN_TCP_NAME --protocol tcp --jump DROP
 
-  TCP_CHAIN=yes
+  CHAIN_TCP=yes
 }
 
 # 4.7 UDP chain - Enalbe only specified UDP ports
 #
 build_udp_chain() {
+  CHAIN_UDP_NAME=UDP
+
   # Create chain
-  $IPTABLES --new-chain UDP
-  $IPTABLES --flush     UDP
+  $IPTABLES --new-chain $CHAIN_UDP_NAME
+  $IPTABLES --flush     $CHAIN_UDP_NAME
   # Define chain
   for PORT in $ENABLED_UDP_PORTS; do
-    $IPTABLES --append UDP --protocol udp --destination-port $PORT --jump ACCEPT
+    $IPTABLES --append $CHAIN_UDP_NAME --protocol udp --destination-port $PORT --jump ACCEPT
   done
 
   # Default policy
-  $IPTABLES --append UDP --protocol udp --jump DROP
+  $IPTABLES --append $CHAIN_UDP_NAME --protocol udp --jump DROP
 
-  UDP_CHAIN=yes
+  CHAIN_UDP=yes
 }
 
 # 4.8 ICMP chain - Enable and/or limit only some services
 #
 build_icmp_chain() {
+  CHAIN_ICMP_NAME=ICMP
+
   # Create chain
-  $IPTABLES --new-chain ICMP
-  $IPTABLES --flush     ICMP
+  $IPTABLES --new-chain $CHAIN_ICMP_NAME
+  $IPTABLES --flush     $CHAIN_ICMP_NAME
   # INFO: ICMP types
   # Type    Name                                  Reference
   # ------- ------------------------------------- ---------------
@@ -260,24 +282,59 @@ build_icmp_chain() {
   #  40     Photuris                              [RFC2521]
   #  41-255 Reserved                              [JBP]
 
-  $IPTABLES --append ICMP --protocol icmp --icmp-type  0 --jump ACCEPT
-  $IPTABLES --append ICMP --protocol icmp --icmp-type  3 --jump ACCEPT
-  $IPTABLES --append ICMP --protocol icmp --icmp-type  4 --jump ACCEPT
-  $IPTABLES --append ICMP --protocol icmp --icmp-type  8 --match limit --limit 6/m --jump ACCEPT
-  $IPTABLES --append ICMP --protocol icmp --icmp-type  8 --jump ACCEPT
-  $IPTABLES --append ICMP --protocol icmp --icmp-type 11 --jump ACCEPT
-  $IPTABLES --append ICMP --protocol icmp --icmp-type 12 --jump ACCEPT
-  $IPTABLES --append ICMP --protocol icmp --icmp-type 30 --jump ACCEPT
+  $IPTABLES --append $CHAIN_ICMP_NAME --protocol icmp --icmp-type  0 --jump ACCEPT
+  $IPTABLES --append $CHAIN_ICMP_NAME --protocol icmp --icmp-type  3 --jump ACCEPT
+  $IPTABLES --append $CHAIN_ICMP_NAME --protocol icmp --icmp-type  4 --jump ACCEPT
+  $IPTABLES --append $CHAIN_ICMP_NAME --protocol icmp --icmp-type  8 --match limit --limit 6/m --jump ACCEPT
+  $IPTABLES --append $CHAIN_ICMP_NAME --protocol icmp --icmp-type  8 --jump ACCEPT
+  $IPTABLES --append $CHAIN_ICMP_NAME --protocol icmp --icmp-type 11 --jump ACCEPT
+  $IPTABLES --append $CHAIN_ICMP_NAME --protocol icmp --icmp-type 12 --jump ACCEPT
+  $IPTABLES --append $CHAIN_ICMP_NAME --protocol icmp --icmp-type 30 --jump ACCEPT
   # Default policy
-  $IPTABLES --append ICMP --protocol icmp                --jump DROP
+  $IPTABLES --append $CHAIN_ICMP_NAME --protocol icmp                --jump DROP
 
-  ICMP_CHAIN=yes
+  CHAIN_ICMP=yes
 }
 
+# 4.8 BlackList chain - Disable access of spceific IP addresses
+#
+build_bl_chain() {
+  CHAIN_BL_NAME=BLACKLIST
+
+  if [ $BL_ENABLE == 1 ]; then
+    # Create chain
+    $IPTABLES --new-chain $CHAIN_BL_NAME
+    $IPTABLES --flush     $CHAIN_BL_NAME
+
+    # Prepare blacklist
+    if [ "x$BL_FILE" != "x" ]; then
+      declare -a $BL_FILE
+      BL_LIST=(`cat "$BL_FILE" | tr '\n' ' '`)
+    else
+      BL_LIST=
+    fi
+
+    # Define chain
+    if [ "x$BL_LIST" != "x" ]; then
+      for i in $(seq 0 $((${#BL_LIST[@]} - 1))); do
+        $IPTABLES --append $CHAIN_BL_NAME --source ${BL_LIST[$i]} --jump DROP
+      done
+    fi
+
+    # Default policy
+    $IPTABLES --append $CHAIN_BL_NAME --protocol tcp  --jump DROP
+    $IPTABLES --append $CHAIN_BL_NAME --protocol upd  --jump DROP
+    $IPTABLES --append $CHAIN_BL_NAME --protocol icmp --jump DROP
+
+    CHAIN_BL=yes
+  fi
+}
+
+# ****************************************************************************
 # 5. Firewall setup
 #
 make_firewall() {
-  # Set default policy
+  # Set defaults
   set_default_policy
   # Build user chains
   build_spoof_chain
@@ -286,132 +343,141 @@ make_firewall() {
   build_tcp_chain
   build_udp_chain
   build_icmp_chain
+  #build_bl_chain
 
-  # 5.1 Zero counters on all chains
+  # 5.1 Initialize counters on all chains
   #
   $IPTABLES --zero
-  
+
   # 5.2 Setup INPUT chain
   #
+  $IPTABLES --append INPUT --match state --state ESTABLISHED,RELATED --jump ACCEPT
 
-  # Drop packets from any host from the deny list
-  if [ "x$DENY_LIST" != "x" ]; then
-    for i in $(seq 0 $((${#DENY_LIST[@]} - 1)))
-    do
-      $IPTABLES --append INPUT --source ${DENY_LIST[$i]} --jump DROP
-    done
-  fi
-
-  if [ "x$SPOOF_CHAIN" == "xyes" ]; then
+  if [ "x$CHAIN_SPOOF" == "xyes" ]; then
     # Log and drop suspicious source addresses
-    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_A_PRVT_NTWRK  --jump SPOOF
-    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_A_PRVT_NTWRK  --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_A_PRVT_NTWRK  --jump $CHAIN_SPOOF_NAME
+    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_A_PRVT_NTWRK  --jump $CHAIN_SPOOF_NAME
 
-    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_B_PRVT_NTWRK  --jump SPOOF
-    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_B_PRVT_NTWRK  --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_B_PRVT_NTWRK  --jump $CHAIN_SPOOF_NAME
+    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_B_PRVT_NTWRK  --jump $CHAIN_SPOOF_NAME
 
-    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $LO_NTWRK            --jump SPOOF
-    $IPTABLES --append INPUT --in-interface $INET_IF --source $LO_NTWRK            --jump SPOOF
-    $IPTABLES --append INPUT --in-interface $LAN_IF  --source $LO_NTWRK            --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $LO_NTWRK            --jump $CHAIN_SPOOF_NAME
+    $IPTABLES --append INPUT --in-interface $INET_IF --source $LO_NTWRK            --jump $CHAIN_SPOOF_NAME
+    $IPTABLES --append INPUT --in-interface $LAN_IF  --source $LO_NTWRK            --jump $CHAIN_SPOOF_NAME
 
-    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_D_MLTCST      --jump SPOOF
-    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_D_MLTCST      --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_D_MLTCST      --jump $CHAIN_SPOOF_NAME
+    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_D_MLTCST      --jump $CHAIN_SPOOF_NAME
 
-    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_E_RSRVD_NTWRK --jump SPOOF
-    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_E_RSRVD_NTWRK --jump SPOOF
+    $IPTABLES --append INPUT --in-interface $EXT_IF  --source $CLASS_E_RSRVD_NTWRK --jump $CHAIN_SPOOF_NAME
+    $IPTABLES --append INPUT --in-interface $INET_IF --source $CLASS_E_RSRVD_NTWRK --jump $CHAIN_SPOOF_NAME
 
     #$IPTABLES --append INPUT                         --source $ANYWHERE           --jump SPOOF
   fi
 
-  if [ "x$BAD_TCP_CHAIN" == "xyes" ]; then
+  if [ "x$CHAIN_BADTCP" == "xyes" ]; then
     # Log and drop some bad tcp packets
-    $IPTABLES --append INPUT --protocol tcp --tcp-flags ALL  ALL                 --jump BAD_TCP
-    $IPTABLES --append INPUT --protocol tcp --tcp-flags ALL  FIN,URG,PSH         --jump BAD_TCP
-    $IPTABLES --append INPUT --protocol tcp --tcp-flags ALL  SYN,RST,ACK,FIN,URG --jump BAD_TCP
+    $IPTABLES --append INPUT --protocol tcp --tcp-flags ALL  ALL                 --jump $CHAIN_BADTCP_NAME
+    $IPTABLES --append INPUT --protocol tcp --tcp-flags ALL  FIN,URG,PSH         --jump $CHAIN_BADTCP_NAME
+    $IPTABLES --append INPUT --protocol tcp --tcp-flags ALL  SYN,RST,ACK,FIN,URG --jump $CHAIN_BADTCP_NAME
   fi
-  
-  if [ "x$SCAN_CHAIN" == "xyes" ]; then
+
+  if [ "x$CHAIN_SCAN" == "xyes" ]; then
     # Log and drop packets frequently used by port-scanners
-    $IPTABLES --append INPUT --protocol tcp --tcp-flags ALL      NONE    --jump SCAN
-    $IPTABLES --append INPUT --protocol tcp --tcp-flags SYN,FIN  SYN,FIN --jump SCAN
-    $IPTABLES --append INPUT --protocol tcp --tcp-flags SYN,RST  SYN,RST --jump SCAN
-    $IPTABLES --append INPUT --protocol tcp --tcp-flags FIN,RST  FIN,RST --jump SCAN
-    $IPTABLES --append INPUT --protocol tcp --tcp-flags ACK,FIN  FIN     --jump SCAN
-    $IPTABLES --append INPUT --protocol tcp --tcp-flags ACK,PSH  PSH     --jump SCAN
-    $IPTABLES --append INPUT --protocol tcp --tcp-flags ACK,URG  URG     --jump SCAN
+    $IPTABLES --append INPUT --protocol tcp --tcp-flags ALL      NONE    --jump $CHAIN_SCAN_NAME
+    $IPTABLES --append INPUT --protocol tcp --tcp-flags SYN,FIN  SYN,FIN --jump $CHAIN_SCAN_NAME
+    $IPTABLES --append INPUT --protocol tcp --tcp-flags SYN,RST  SYN,RST --jump $CHAIN_SCAN_NAME
+    $IPTABLES --append INPUT --protocol tcp --tcp-flags FIN,RST  FIN,RST --jump $CHAIN_SCAN_NAME
+    $IPTABLES --append INPUT --protocol tcp --tcp-flags ACK,FIN  FIN     --jump $CHAIN_SCAN_NAME
+    $IPTABLES --append INPUT --protocol tcp --tcp-flags ACK,PSH  PSH     --jump $CHAIN_SCAN_NAME
+    $IPTABLES --append INPUT --protocol tcp --tcp-flags ACK,URG  URG     --jump $CHAIN_SCAN_NAME
   fi
-  
-  if [ "x$DDoS_CHAIN" == "xyes" ]; then
+
+  if [ "x$CHAIN_DDOS" == "xyes" ]; then
     # Prevent SYN Denial of Service attacks
-    $IPTABLES --append INPUT --protocol tcp --tcp-flags SYN,RST,ACK  SYN --jump DDoS
+    $IPTABLES --append INPUT --protocol tcp --tcp-flags SYN,RST,ACK  SYN --jump $CHAIN_DDOS_NAME
   fi
 
-  # Limit packets on the external interface
-  $IPTABLES --append INPUT --in-interface $EXT_IF  --protocol tcp  --jump TCP
-  $IPTABLES --append INPUT --in-interface $EXT_IF  --protocol udp  --jump UDP
-  $IPTABLES --append INPUT --in-interface $EXT_IF  --protocol icmp --jump ICMP
+  if [ "x$CHAIN_TCP" == "xyes" ]; then
+    $IPTABLES --append INPUT --in-interface $EXT_IF  --protocol tcp  --jump $CHAIN_TCP_NAME
+    $IPTABLES --append INPUT --in-interface $INET_IF --protocol tcp  --jump $CHAIN_TCP_NAME
+  fi
 
-  # Limit packets on the internet interface
-  $IPTABLES --append INPUT --in-interface $INET_IF --protocol tcp  --jump TCP
-  $IPTABLES --append INPUT --in-interface $INET_IF --protocol udp  --jump UDP 
-  $IPTABLES --append INPUT --in-interface $INET_IF --protocol icmp --jump ICMP 
+  if [ "x$CHAIN_UDP" == "xyes" ]; then
+    $IPTABLES --append INPUT --in-interface $EXT_IF  --protocol udp  --jump $CHAIN_UDP_NAME
+    $IPTABLES --append INPUT --in-interface $INET_IF --protocol udp  --jump $CHAIN_UDP_NAME
+  fi
+
+  if [ "x$CHAIN_ICMP" == "xyes" ]; then
+    $IPTABLES --append INPUT --in-interface $EXT_IF  --protocol icmp --jump $CHAIN_ICMP_NAME
+    $IPTABLES --append INPUT --in-interface $INET_IF --protocol icmp --jump $CHAIN_ICMP_NAME
+  fi
 
   # Enable all traffic on the 'trusted' interfaces
-  $IPTABLES --append INPUT --in-interface $LO_IF                   --jump ACCEPT
-  if [ "x$ROUTER" == "xyes" ]; then
-    $IPTABLES --append INPUT --in-interface $LAN_IF --source $LAN_NTWRK --jump ACCEPT
-  fi
+  $IPTABLES --append INPUT --in-interface $LO_IF  --jump ACCEPT
+  $IPTABLES --append INPUT --in-interface $LAN_IF --jump ACCEPT
 
   # 5.3 Setup OUTPUT chain
   #
   # No rules - everything is allowed
-
-  # 5.4 FORWARD chain setup
-  #
-  if [ "x$ROUTER" == "xyes" ]; then
-    $IPTABLES --append FORWARD --in-interface $LAN_IF  --out-interface $INET_IF --source $LAN_NTWRK      --jump ACCEPT
-    $IPTABLES --append FORWARD --in-interface $INET_IF --out-interface $LAN_IF  --destination $LAN_NTWRK --jump ACCEPT
-  fi
-
-  # 5.5 Setup tables
-  if [ "x$ROUTER" == "xyes" ]; then
-    $IPTABLES --table mangle --append PREROUTING  --in-interface  $INET_IF --jump TTL --ttl-inc 1
-    $IPTABLES --table mangle --append POSTROUTING --source $LAN_NTWRK --out-interface $INET_IF --jump TTL --ttl-set 64
-    $IPTABLES --table nat    --append POSTROUTING --out-interface $INET_IF --jump MASQUERADE
-  fi
 }
 
+# ****************************************************************************
+# 6. Router setup
 #
-# 6. Firewall and router control
+make_router() {
+  TERM_SRV=192.168.1.28
+  VIRT_SRV=192.168.1.21
+
+  # 6.1 Setup INPUT chain
+  $IPTABLES --append INPUT --in-interface $LAN_IF --source $LAN_NTWRK --jump ACCEPT
+
+  # 6.2 Setup FORWARD chain
+  #
+  $IPTABLES --append FORWARD --in-interface $LAN_IF  --out-interface $INET_IF --source      $LAN_NTWRK --jump ACCEPT
+  $IPTABLES --append FORWARD --in-interface $INET_IF --out-interface $LAN_IF  --destination $LAN_NTWRK --jump ACCEPT
+
+  # 6.3 Setup routing
+  $IPTABLES --table mangle --append PREROUTING  --in-interface  $INET_IF --jump TTL --ttl-inc 1
+  $IPTABLES --table nat    --append POSTROUTING --out-interface $INET_IF --jump MASQUERADE
+  $IPTABLES --table mangle --append POSTROUTING --source $LAN_NTWRK --out-interface $INET_IF --jump TTL --ttl-set 64
+
+  # 6.4 Setup port forwarding
+  $IPTABLES --table nat    --append PREROUTING  --protocol tcp --in-interface $INET_IF --dport 3389 --jump DNAT --to $TERM_SRV:3389
+  $IPTABLES --table nat    --append PREROUTING  --protocol tcp --in-interface $INET_IF --dport 8333 --jump DNAT --to $VIRT_SRV:8333
+}
+
+# ****************************************************************************
+# 9. Firewall and router control
 #
 
-# 6.1 Start
+# 9.1 Start
 #
 start() {
   load_modules
   flush
 
-  if [ "a$ROUTER" == "ayes" ]; then
-    echo -n "Configuring firewall and router... "
-    kernel_setup $IP_FORWARD s_enable
-  else
-    echo -n "Configuring firewall... "
-    kernel_setup $IP_FORWARD s_disable
-  fi
-
-  kernel_setup $TCP_SYNCOOKIES              s_enable
+  #kernel_setup $TCP_SYNCOOKIES              s_enable
   kernel_setup $ICMP_ECHO_IGNORE_BROADCASTS s_enable
   kernel_setup $RP_FILTER                   s_enable
   kernel_setup $LOG_MARTIANS                s_enable
+  if [ "a$ROUTER" == "ayes" ]; then
+    kernel_setup $IP_FORWARD s_enable
+  else
+    kernel_setup $IP_FORWARD s_disable
+  fi
 
+  echo -n "Configuring firewall... "
   make_firewall
+  print_result $?
 
-  if [ $? == 0 ]; then
-    echo "${C_GREEN}Done${C_NORMAL}"
+  if [ "a$ROUTER" == "ayes" ]; then
+    echo -n "Configuring router... "
+    make_router
+    print_result $?
   fi
 }
 
-# 6.2 Stop
+# 9.2 Stop
 #
 stop() {
   if [ "a$ROUTER" == "ayes" ]; then
@@ -420,15 +486,19 @@ stop() {
     echo -n "Stopping firewall... "
   fi
 
+  kernel_setup $LOG_MARTIANS                s_disable
+  kernel_setup $RP_FILTER                   s_disable
+  kernel_setup $ICMP_ECHO_IGNORE_BROADCASTS s_disable
+  #kernel_setup $TCP_SYNCOOKIES              s_disable
+  kernel_setup $IP_FORWARD                  s_disable
+
   flush
   unload_modules
 
-  if [ $? == 0 ]; then
-    echo "${C_GREEN}Done${C_NORMAL}"
-  fi
+  print_result $?
 }
 
-# 6.3 Restart
+# 9.3 Restart
 #
 restart() {
   stop
@@ -436,10 +506,10 @@ restart() {
   start
 }
 
-# 6.4 Help information
+# 9.4 Help information
 #
 help() {
-  echo "firewall for slackware 0.2.0"
+  echo "firewall for slackware 0.2.1"
   echo "Written by George D. Sotirov <gdsotirov@dir.bg>"
   echo
   echo "Usage: ${0} [action]"
@@ -450,7 +520,7 @@ help() {
 
 action=$1
 
-#
+# ****************************************************************************
 # Main program
 #
 case "$action" in
