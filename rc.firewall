@@ -3,9 +3,8 @@
 # Firewall and router setup and control
 # Version: 0.2.1
 #
-# Written by George D. Sotirov <gdsotirov@dir.bg>
+# Written by Georgi D. Sotirov <gdsotirov@gmail.com>
 # Based on examples over the Internet
-# $Id: rc.firewall,v 1.6 2009/10/11 11:08:45 gsotirov Exp $
 #
 
 
@@ -512,7 +511,7 @@ restart() {
 #
 help() {
   echo "firewall for slackware 0.2.1"
-  echo "Written by George D. Sotirov <gdsotirov@dir.bg>"
+  echo "Written by Georgi D. Sotirov <gdsotirov@gmail.com>"
   echo
   echo "Usage: ${0} [action]"
   echo "        action    - Action can be one of start, stop, restart, help."
